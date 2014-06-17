@@ -10,13 +10,13 @@ import "strconv"
 var network_id = string("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
 
 func main() {
-	ring := cliod.OpenRing("/home/b1nzy/.gnupg/pubring.gpg", "/home/b1nzy/.gnupg/secring.gpg")
+	ring := cliod.OpenRing("/home/andrei/.gnupg/pubring.gpg", "/home/andrei/.gnupg/secring.gpg")
 	fmt.Printf("%s", ring)
-	key := ring.PubkeyByEmail("b1naryth1ef+1@gmail.com")
+	key := ring.PrivkeyByEmail("b1naryth1ef@gmail.com")
 	fmt.Printf("%s\n", key)
 
 	i, _ := strconv.Atoi(os.Args[1])
-	client := cliod.NewNetClient(i, key, ring.Private)
+	client := cliod.NewNetClient(i, key, &ring)
 	go client.ServerListenerLoop()
 
 	client.Seed(network_id, []string{

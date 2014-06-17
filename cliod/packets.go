@@ -7,16 +7,16 @@ package cliod
 // 	"log"
 // )
 
-type PacketAuthPayload struct {
-	T1, T2 int32
-}
-
 type Packet interface {
 	A()
 }
 
 type BasePacket struct {
 	ID uint16
+}
+
+type EncryptedPacket struct {
+	Payload []byte
 }
 
 type PacketHello struct {
@@ -29,7 +29,7 @@ type PacketHello struct {
 type PacketAuth struct {
 	ID        uint16
 	PublicKey []byte
-	Payload   []byte
+	T1, T2    int32
 }
 
 func (p *PacketHello) A() {}
