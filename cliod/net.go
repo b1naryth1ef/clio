@@ -32,8 +32,7 @@ type NetClient struct {
 	Ident     *openpgp.Entity
 	Ring      *Ring
 	NetworkID string
-	Outgoing  map[[20]byte]*NetNode
-	Incoming  map[[20]byte]*NetNode
+	Peers     map[[20]byte]*NetNode
 	Q         []*NetNode
 	Server    net.Listener
 }
@@ -46,12 +45,11 @@ func NewNetClient(listen_port int, id *openpgp.Entity, r *Ring) NetClient {
 	}
 
 	return NetClient{
-		Ident:    id,
-		Ring:     r,
-		Outgoing: make(map[[20]byte]*NetNode),
-		Incoming: make(map[[20]byte]*NetNode),
-		Q:        make([]*NetNode, 0),
-		Server:   server,
+		Ident:  id,
+		Ring:   r,
+		Peers:  make(map[[20]byte]*NetNode),
+		Q:      make([]*NetNode, 0),
+		Server: server,
 	}
 }
 
@@ -69,7 +67,7 @@ func (nc *NetClient) Decrypt(data []byte) *openpgp.MessageDetails {
 	}, nil)
 
 	if e != nil {
-		log.Printf("%v", e)
+		log.Printf("ERROR: %v", e)
 	}
 
 	return dec
@@ -120,19 +118,25 @@ func (nn *NetNode) ListenLoop(nc *NetClient) {
 				continue
 			}
 
-			if nn.ID != [20]byte{} && dec.SignedBy.PublicKey.Fingerprint != nn.ID {
-				log.Printf("ERROR: Auth Packet was signed by a different key then the nodes ID! (%v != %v)",
+			log.Printf("Signed By: %v", dec.SignedBy.PublicKey.Fingerprint)
+			sfp := dec.SignedBy.PublicKey.Fingerprint
+			if nn.ID != [20]byte{} && sfp != nn.ID {
+				log.Printf("ERROR: Encrypted Packet was signed by a different key then the nodes ID! (%v != %v)",
 					dec.SignedBy.PublicKey.Fingerprint, nn.ID)
 				continue
 			}
 
 			data, _ = ioutil.ReadAll(dec.LiteralData.Body)
+			if len(data) <= 0 {
+				log.Printf("ERROR: No data decoded from encrypted packet!")
+				return
+			}
 		}
 
 		json.Unmarshal(data, &id_pk)
 
 		if time.Now().Sub(id_pk.Time) > (time.Second * 30) {
-			log.Printf("Packet is expired!")
+			log.Printf("Packet is expired: %v (%v)", id_pk.Time, data)
 			continue
 		}
 
@@ -146,8 +150,55 @@ func (nn *NetNode) ListenLoop(nc *NetClient) {
 			var obj PacketAuth
 			json.Unmarshal(data, &obj)
 			nn.handleAuthPacket(nc, obj)
+		case 3:
+			var obj PacketPing
+			json.Unmarshal(data, &obj)
+			nn.handlePingPacket(nc, obj)
+		case 20:
+			var obj PacketPeerListRequest
+			json.Unmarshal(data, &obj)
+			nn.handlePeerListRequestPacket(nc, obj)
+		case 21:
+			var obj PacketPeerListSync
+			json.Unmarshal(data, &obj)
+			nn.handlePeerListSyncPacket(nc, obj)
 		}
 
+	}
+}
+
+func (nn *NetNode) handlePingPacket(nc *NetClient, p PacketPing) {
+
+}
+
+func (nn *NetNode) handlePeerListRequestPacket(nc *NetClient, p PacketPeerListRequest) {
+	// Prepare a peer list and send it
+	var i int32
+	peerli := make([]PacketPeer, 0)
+
+	for _, peer := range nc.Peers {
+		i += 1
+		if i > p.MaxPeers {
+			break
+		}
+
+		pr := PacketPeer{peer.ID, peer.Conn.RemoteAddr().String()}
+
+		peerli = append(peerli, pr)
+	}
+
+	nn.Send(&PacketPeerListSync{
+		Peers: peerli,
+	})
+}
+
+func (nn *NetNode) handlePeerListSyncPacket(nc *NetClient, p PacketPeerListSync) {
+	for _, peer := range p.Peers {
+		if _, exists := nc.Peers[peer.ID]; !exists {
+			log.Printf("Would try to connect to %v (%v)", peer.IP, peer.ID)
+		} else {
+			log.Printf("Won't connect too %v (%v), already have them!", peer.IP, peer.ID)
+		}
 	}
 }
 
@@ -165,8 +216,13 @@ func (nn *NetNode) handleAuthPacket(nc *NetClient, p PacketAuth) {
 
 	// ehhhhhh
 	nn.ID = nn.Key[0].PrimaryKey.Fingerprint
+	nc.Peers[nn.ID] = nn
 
 	log.Printf("Successfully authenticated!")
+	nn.Send(&PacketPeerListRequest{
+		MaxPeers: 50,
+	})
+
 }
 
 func (nn *NetNode) handleWelcomePacket(nc *NetClient, p PacketHello) {
@@ -186,14 +242,17 @@ func (nn *NetNode) handleWelcomePacket(nc *NetClient, p PacketHello) {
 	}
 
 	nn.Key = pub_ring
+	nn.ID = nn.Key[0].PrimaryKey.Fingerprint
+
+	// This doesn't quiet seem right
+	nc.Peers[nn.ID] = nn
 
 	pub_w := bytes.NewBuffer([]byte{})
 	nc.Ident.Serialize(pub_w)
 
 	packet := PacketAuth{
-		BasePacket: NewBasePacket(2),
-		PublicKey:  pub_w.Bytes(),
-		T1:         p.Token,
+		PublicKey: pub_w.Bytes(),
+		T1:        p.Token,
 	}
 
 	nn.Send(&packet)
@@ -202,7 +261,13 @@ func (nn *NetNode) handleWelcomePacket(nc *NetClient, p PacketHello) {
 // Send a packet to the node
 func (nn *NetNode) Send(packet Packet) {
 	var network []byte
-	data, _ := json.Marshal(packet)
+
+	packet.SetID()
+	data, err := json.Marshal(packet)
+	if err != nil {
+		log.Printf("ERROR SENDING: %v", err)
+		return
+	}
 
 	if nn.Key != nil {
 		network = append(network, '\x00')
@@ -232,7 +297,6 @@ func (nn *NetNode) Handshake(nc *NetClient) bool {
 
 	nn.token = GetRandomToken()
 	nn.Send(&PacketHello{
-		BasePacket:  NewBasePacket(1),
 		PublicKey:   pkbuff.Bytes(),
 		NetworkHash: nc.NetworkID,
 		Token:       nn.token,
@@ -254,7 +318,6 @@ func (nc *NetClient) ServerListenerLoop() {
 			Conn: conn,
 		}
 
-		nc.Q = append(nc.Q, &node)
 		go node.ListenLoop(nc)
 	}
 }
@@ -262,14 +325,7 @@ func (nc *NetClient) ServerListenerLoop() {
 func (nc *NetClient) Seed(netid string, ips []string) {
 	nc.NetworkID = netid
 	for _, ip := range ips {
-		nn := nc.AttemptConnection(ip)
-		if nn == nil {
-			continue
-		}
-
-		if nn.Valid {
-			nc.Outgoing[nn.ID] = nn
-		}
+		nc.AttemptConnection(ip)
 	}
 }
 
@@ -284,10 +340,11 @@ func (nc *NetClient) AttemptConnection(ip string) *NetNode {
 		ID:    [20]byte{},
 		Trust: 0,
 		Conn:  conn,
+		nc:    nc,
 	}
 
-	node.Handshake(nc)
 	go node.ListenLoop(nc)
+	node.Handshake(nc)
 
 	return &node
 }

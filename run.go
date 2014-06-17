@@ -23,12 +23,14 @@ func main() {
 
 	//fmt.Printf("Results: %v\n", len(store.Index.FindByTags([]string{"test"})))
 
-	i, _ := strconv.Atoi(os.Args[1])
-	client := cliod.NewNetClient(i, key, &ring)
+	our_port, _ := strconv.Atoi(os.Args[1])
+	their_port, _ := strconv.Atoi(os.Args[2])
+
+	client := cliod.NewNetClient(our_port, key, &ring)
 	go client.ServerListenerLoop()
 
 	client.Seed(network_id, []string{
-		"127.0.0.1:1338",
+		fmt.Sprintf("127.0.0.1:%v", their_port),
 	})
 
 	for {

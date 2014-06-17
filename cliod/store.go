@@ -7,7 +7,6 @@ import (
 	"code.google.com/p/go-uuid/uuid"
 	"encoding/json"
 	"io/ioutil"
-	//"log"
 	"os"
 	"time"
 )
