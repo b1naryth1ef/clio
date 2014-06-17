@@ -15,6 +15,14 @@ func main() {
 	key := ring.PrivkeyByEmail("b1naryth1ef@gmail.com")
 	fmt.Printf("%s\n", key)
 
+	// store := cliod.NewStore("/home/andrei/.clio")
+	// store.Init()
+
+	// crate := cliod.NewCrate([]byte{}, []string{"test"})
+	// store.PutCrate(crate)
+
+	//fmt.Printf("Results: %v\n", len(store.Index.FindByTags([]string{"test"})))
+
 	i, _ := strconv.Atoi(os.Args[1])
 	client := cliod.NewNetClient(i, key, &ring)
 	go client.ServerListenerLoop()

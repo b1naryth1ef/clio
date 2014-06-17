@@ -42,5 +42,11 @@ type PacketAuth struct {
 	T1        int32
 }
 
-func (p *PacketHello) A() {}
-func (p *PacketAuth) A()  {}
+type PacketPeerSync struct {
+	BasePacket
+	Peers map[[20]byte]string
+}
+
+func (p *PacketAuth) A()     {}
+func (p *PacketHello) A()    {}
+func (p *PacketPeerSync) A() {}

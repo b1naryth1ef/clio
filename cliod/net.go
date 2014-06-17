@@ -131,7 +131,7 @@ func (nn *NetNode) ListenLoop(nc *NetClient) {
 
 		json.Unmarshal(data, &id_pk)
 
-		if time.Now().Sub(id_pk.Time) > (time.Minute * 10) {
+		if time.Now().Sub(id_pk.Time) > (time.Second * 30) {
 			log.Printf("Packet is expired!")
 			continue
 		}
