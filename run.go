@@ -20,7 +20,7 @@ func main() {
 	go client.ServerListenerLoop()
 
 	client.Seed(network_id, []string{
-		"127.0.0.1:1337",
+		"127.0.0.1:1338",
 	})
 
 	for {

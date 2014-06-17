@@ -1,5 +1,7 @@
 package cliod
 
+import "time"
+
 // import (
 // 	"bytes"
 // 	"encoding/base64"
@@ -12,7 +14,15 @@ type Packet interface {
 }
 
 type BasePacket struct {
-	ID uint16
+	ID   uint16
+	Time time.Time
+}
+
+func NewBasePacket(ID uint16) BasePacket {
+	return BasePacket{
+		ID:   ID,
+		Time: time.Now(),
+	}
 }
 
 type EncryptedPacket struct {
@@ -20,16 +30,16 @@ type EncryptedPacket struct {
 }
 
 type PacketHello struct {
-	ID          uint16
+	BasePacket
 	PublicKey   []byte
 	NetworkHash string
 	Token       int32
 }
 
 type PacketAuth struct {
-	ID        uint16
+	BasePacket
 	PublicKey []byte
-	T1, T2    int32
+	T1        int32
 }
 
 func (p *PacketHello) A() {}

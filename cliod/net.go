@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
+	"time"
 )
 
 // A NetNode represents an external network node
@@ -74,7 +75,6 @@ func (nc *NetClient) Decrypt(data []byte) *openpgp.MessageDetails {
 	return dec
 }
 
-// TODO: replay attack
 func (nc *NetClient) Encrypt(data []byte, to openpgp.EntityList) []byte {
 	var edata bytes.Buffer
 	ptxt, err := openpgp.Encrypt(&edata, to, nc.Ident, nil, nil)
@@ -109,28 +109,32 @@ func (nn *NetNode) ListenLoop(nc *NetClient) {
 
 			json.Unmarshal(data[1:], &obj)
 
-			log.Printf("S3: %v", len(obj.Payload))
 			dec := nc.Decrypt(obj.Payload)
 			if dec == nil {
 				log.Printf("ERROR: Failed to decrypt packet!")
-				return
+				continue
 			}
 
 			if !dec.IsEncrypted || !dec.IsSigned {
 				log.Printf("ERROR: Encrypted Packet was not signed, or not encrypted!")
-				return
+				continue
 			}
 
 			if nn.ID != [20]byte{} && dec.SignedBy.PublicKey.Fingerprint != nn.ID {
 				log.Printf("ERROR: Auth Packet was signed by a different key then the nodes ID! (%v != %v)",
 					dec.SignedBy.PublicKey.Fingerprint, nn.ID)
-				return
+				continue
 			}
 
 			data, _ = ioutil.ReadAll(dec.LiteralData.Body)
 		}
 
 		json.Unmarshal(data, &id_pk)
+
+		if time.Now().Sub(id_pk.Time) > (time.Minute * 10) {
+			log.Printf("Packet is expired!")
+			continue
+		}
 
 		log.Printf("Got packet w/ id `%v`", id_pk.ID)
 		switch id_pk.ID {
@@ -155,7 +159,6 @@ func (nn *NetNode) handleAuthPacket(nc *NetClient, p PacketAuth) {
 
 	// We are atuhenticated, and will start using the new token
 	nn.Authed = true
-	nn.token = p.T2
 
 	pubr := bytes.NewReader(p.PublicKey)
 	nn.Key, _ = openpgp.ReadKeyRing(pubr)
@@ -188,10 +191,9 @@ func (nn *NetNode) handleWelcomePacket(nc *NetClient, p PacketHello) {
 	nc.Ident.Serialize(pub_w)
 
 	packet := PacketAuth{
-		ID:        2,
-		PublicKey: pub_w.Bytes(),
-		T1:        p.Token,
-		T2:        nn.token,
+		BasePacket: NewBasePacket(2),
+		PublicKey:  pub_w.Bytes(),
+		T1:         p.Token,
 	}
 
 	nn.Send(&packet)
@@ -230,7 +232,7 @@ func (nn *NetNode) Handshake(nc *NetClient) bool {
 
 	nn.token = GetRandomToken()
 	nn.Send(&PacketHello{
-		ID:          1,
+		BasePacket:  NewBasePacket(1),
 		PublicKey:   pkbuff.Bytes(),
 		NetworkHash: nc.NetworkID,
 		Token:       nn.token,
