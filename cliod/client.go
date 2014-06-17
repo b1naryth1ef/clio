@@ -1,15 +1,16 @@
 package cliod
 
 import (
-	"io"
+	"code.google.com/p/go.crypto/openpgp"
 )
 
-type Client struct{}
-
-func ClientRegister(email string) Client {
-	return Client{}
+type Client struct {
+	Entity *openpgp.Entity
+	pw     string
 }
 
-func ClientLogin(keyfile io.Reader, pw string) Client {
-	return Client{}
+func ClientLogin(e *openpgp.Entity, pw string) Client {
+	return Client{
+		Entity: e,
+	}
 }

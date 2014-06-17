@@ -1,1 +1,1 @@
-go run run.go
+go run run.go $@
