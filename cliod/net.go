@@ -23,6 +23,9 @@ type NetNode struct {
 	// The level of trust we have assigned this node (unused currently)
 	Trust int
 
+	// The public connection info for this node
+	IP string
+
 	// The actual socket too this client
 	Conn net.Conn
 
@@ -46,6 +49,8 @@ type NetNode struct {
 type NetClient struct {
 	// Our local public/private key pair
 	Ident *openpgp.Entity
+
+	Port int
 
 	// The ring for decrypting messages (TODO: try creating a new ring w/ ident)
 	Ring *Ring
@@ -77,6 +82,7 @@ func NewNetClient(listen_port int, id *openpgp.Entity, r *Ring, s *Store) NetCli
 	}
 
 	return NetClient{
+		Port:   listen_port,
 		Ident:  id,
 		Ring:   r,
 		Peers:  make(map[[20]byte]*NetNode),
@@ -322,7 +328,7 @@ func (nn *NetNode) handlePeerListRequestPacket(nc *NetClient, p PacketPeerListRe
 			continue
 		}
 
-		pr := PacketPeer{peer.ID, peer.Conn.RemoteAddr().String()}
+		pr := PacketPeer{peer.ID, peer.IP}
 
 		peerli = append(peerli, pr)
 	}
@@ -335,7 +341,8 @@ func (nn *NetNode) handlePeerListRequestPacket(nc *NetClient, p PacketPeerListRe
 func (nn *NetNode) handlePeerListSyncPacket(nc *NetClient, p PacketPeerListSync) {
 	for _, peer := range p.Peers {
 		if _, exists := nc.Peers[peer.ID]; !exists {
-			log.Printf("Would try to connect to %v (%v)", peer.IP, peer.ID)
+			log.Printf("Trying to connect to %v (%v)", peer.IP, peer.ID)
+			nc.AttemptConnection(peer.IP)
 		} else {
 			log.Printf("Won't connect too %v (%v), already have them!", peer.IP, peer.ID)
 		}
@@ -385,6 +392,7 @@ func (nn *NetNode) handleWelcomePacket(nc *NetClient, p PacketHello) {
 	nn.Key = pub_ring
 	nn.ID = nn.Key[0].PrimaryKey.Fingerprint
 	nn.PeerCount = p.PeerCount
+	nn.IP = p.IP
 
 	// This doesn't quiet seem right
 	nc.Peers[nn.ID] = nn
@@ -460,6 +468,8 @@ func (nn *NetNode) Handshake(nc *NetClient) bool {
 		NetworkHash: nc.NetworkID,
 		Token:       nn.token,
 		PeerCount:   len(nc.Peers),
+		// TODO: lol wut
+		IP: fmt.Sprintf("localhost:%v", nc.Port),
 	}, false)
 	return true
 }

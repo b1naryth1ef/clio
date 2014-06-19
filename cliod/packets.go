@@ -36,6 +36,7 @@ type PacketHello struct {
 	NetworkHash string
 	Token       int32
 	PeerCount   int
+	IP          string
 }
 
 type PacketAuth struct {

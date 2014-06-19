@@ -5,7 +5,6 @@ import (
 	"./cliod"
 	"fmt"
 	"os"
-	"os/user"
 	"strconv"
 	"time"
 )
@@ -13,34 +12,38 @@ import (
 var network_id = string("")
 
 func main() {
-	usr, _ := user.Current()
-	ring := cliod.OpenRing(usr.HomeDir+"/.gnupg/pubring.gpg", usr.HomeDir+"/.gnupg/secring.gpg")
-	key := ring.PrivkeyByEmail("b1naryth1ef+1@gmail.com")
+	cliod.Test()
+	return
+	if len(os.Args) < 3 {
+		fmt.Printf("Usage: ./run <email> <port> [seed_addr]\n")
+		return
+	}
 
-	store := cliod.NewStore(usr.HomeDir + "/.clio")
+	user := cliod.GetCurrentUserHome()
+
+	var email, seed string
+	var port int
+
+	email = os.Args[1]
+	port, _ = strconv.Atoi(os.Args[2])
+	if len(os.Args) >= 4 {
+		seed = os.Args[3]
+	}
+
+	ring := cliod.OpenRing(user+"/.gnupg/pubring.gpg", user+"/.gnupg/secring.gpg")
+	key := ring.PrivkeyByEmail(email)
+
+	store := cliod.NewStore(user + "/.clio")
 	store.Init()
 
-	// crate := cliod.NewCrate([]byte{}, []string{"test"})
-	// store.PutCrate(crate)
-
-	// fmt.Printf("Results: %v\n", len(store.Index.FindByTags([]string{"test"})))
-
-	our_port, _ := strconv.Atoi(os.Args[1])
-
-	client := cliod.NewNetClient(our_port, key, &ring, &store)
+	client := cliod.NewNetClient(port, key, &ring, &store)
 	go client.ServerListenerLoop()
 
-	if len(os.Args) > 2 {
-		their_port, _ := strconv.Atoi(os.Args[2])
-		client.Seed(network_id, []string{
-			fmt.Sprintf("127.0.0.1:%v", their_port),
-		})
+	if seed != "" {
+		client.Seed(network_id, []string{seed})
 	}
 
 	for {
 		time.Sleep(time.Second * 5)
 	}
-
-	//cli := cliod.ClientLogin(key, "")
-	//cliod.BuildPacketHello(key.PrimaryKey.Fingerprint, [32]byte{""})
 }
