@@ -8,7 +8,9 @@ type Packet interface {
 
 type BasePacket struct {
 	ID   uint16
+	UID  int32
 	Time time.Time
+	Prop bool
 }
 
 type PacketPeer struct {
@@ -20,6 +22,7 @@ func NewBasePacket(ID uint16) BasePacket {
 	return BasePacket{
 		ID:   ID,
 		Time: time.Now(),
+		UID:  GetRandomToken(),
 	}
 }
 
@@ -32,17 +35,27 @@ type PacketHello struct {
 	PublicKey   []byte
 	NetworkHash string
 	Token       int32
+	PeerCount   int
 }
 
 type PacketAuth struct {
 	BasePacket
 	PublicKey []byte
 	T1        int32
+	PeerCount int
 }
 
 type PacketPing struct {
 	BasePacket
 	Token int
+}
+
+type PacketProxyPacket struct {
+	BasePacket
+	Dest      [20]byte
+	Payload   []byte
+	Queue     bool
+	Important bool
 }
 
 type PacketPeerListRequest struct {
@@ -84,6 +97,10 @@ func (p *PacketAuth) SetID() {
 
 func (p *PacketPing) SetID() {
 	p.BasePacket = NewBasePacket(3)
+}
+
+func (p *PacketProxyPacket) SetID() {
+	p.BasePacket = NewBasePacket(4)
 }
 
 func (p *PacketPeerListRequest) SetID() {

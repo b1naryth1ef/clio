@@ -13,14 +13,21 @@ import (
 	"time"
 )
 
+var MAX_HISTORY int = 50
+
 // A NetNode represents an external network node
 type NetNode struct {
-	ID     [20]byte
-	Trust  int
-	Conn   net.Conn
-	Valid  bool
-	Authed bool
+	ID        [20]byte
+	Trust     int
+	Conn      net.Conn
+	Valid     bool
+	Authed    bool
+	PeerCount int
 
+	// Represents the last time this node asked us to propagate something for limiting
+	LastProp time.Time
+
+	// The public key of thise node
 	Key openpgp.EntityList
 
 	nc    *NetClient
@@ -35,10 +42,13 @@ type NetClient struct {
 	Peers     map[[20]byte]*NetNode
 	Q         []*NetNode
 	Server    net.Listener
+	Store     *Store
+
+	history []int32
 }
 
 // Create a new NetClient
-func NewNetClient(listen_port int, id *openpgp.Entity, r *Ring) NetClient {
+func NewNetClient(listen_port int, id *openpgp.Entity, r *Ring, s *Store) NetClient {
 	server, err := net.Listen("tcp", fmt.Sprintf(":%d", listen_port))
 	if err != nil {
 		log.Panicf("Error binding: %v", err)
@@ -50,6 +60,7 @@ func NewNetClient(listen_port int, id *openpgp.Entity, r *Ring) NetClient {
 		Peers:  make(map[[20]byte]*NetNode),
 		Q:      make([]*NetNode, 0),
 		Server: server,
+		Store:  s,
 	}
 }
 
@@ -89,8 +100,6 @@ func (nc *NetClient) Encrypt(data []byte, to openpgp.EntityList) []byte {
 }
 
 func (nn *NetNode) ListenLoop(nc *NetClient) {
-	var id_pk BasePacket
-
 	reader := bufio.NewReader(nn.Conn)
 	for {
 		data, err := reader.ReadBytes('\n')
@@ -101,74 +110,133 @@ func (nn *NetNode) ListenLoop(nc *NetClient) {
 		}
 		data[len(data)-1] = ' '
 
-		// If the data starts with a null byte, it's encrypted
-		if data[0] == '\x00' {
-			var obj EncryptedPacket
-
-			json.Unmarshal(data[1:], &obj)
-
-			dec := nc.Decrypt(obj.Payload)
-			if dec == nil {
-				log.Printf("ERROR: Failed to decrypt packet!")
-				continue
-			}
-
-			if !dec.IsEncrypted || !dec.IsSigned {
-				log.Printf("ERROR: Encrypted Packet was not signed, or not encrypted!")
-				continue
-			}
-
-			log.Printf("Signed By: %v", dec.SignedBy.PublicKey.Fingerprint)
-			sfp := dec.SignedBy.PublicKey.Fingerprint
-			if nn.ID != [20]byte{} && sfp != nn.ID {
-				log.Printf("ERROR: Encrypted Packet was signed by a different key then the nodes ID! (%v != %v)",
-					dec.SignedBy.PublicKey.Fingerprint, nn.ID)
-				continue
-			}
-
-			data, _ = ioutil.ReadAll(dec.LiteralData.Body)
-			if len(data) <= 0 {
-				log.Printf("ERROR: No data decoded from encrypted packet!")
-				return
-			}
-		}
-
-		json.Unmarshal(data, &id_pk)
-
-		if time.Now().Sub(id_pk.Time) > (time.Second * 30) {
-			log.Printf("Packet is expired: %v (%v)", id_pk.Time, data)
-			continue
-		}
-
-		log.Printf("Got packet w/ id `%v`", id_pk.ID)
-		switch id_pk.ID {
-		case 1:
-			var obj PacketHello
-			json.Unmarshal(data, &obj)
-			nn.handleWelcomePacket(nc, obj)
-		case 2:
-			var obj PacketAuth
-			json.Unmarshal(data, &obj)
-			nn.handleAuthPacket(nc, obj)
-		case 3:
-			var obj PacketPing
-			json.Unmarshal(data, &obj)
-			nn.handlePingPacket(nc, obj)
-		case 20:
-			var obj PacketPeerListRequest
-			json.Unmarshal(data, &obj)
-			nn.handlePeerListRequestPacket(nc, obj)
-		case 21:
-			var obj PacketPeerListSync
-			json.Unmarshal(data, &obj)
-			nn.handlePeerListSyncPacket(nc, obj)
-		}
+		nn.HandlePacket(nc, data)
 
 	}
 }
 
-func (nn *NetNode) handlePingPacket(nc *NetClient, p PacketPing) {
+func (nn *NetNode) HandlePacket(nc *NetClient, data []byte) {
+	var id_pk BasePacket
+	var parsed Packet
 
+	// If the data starts with a null byte, it's encrypted
+	if data[0] == '\x00' {
+		var obj EncryptedPacket
+
+		json.Unmarshal(data[1:], &obj)
+
+		dec := nc.Decrypt(obj.Payload)
+		if dec == nil {
+			log.Printf("ERROR: Failed to decrypt packet!")
+			return
+		}
+
+		if !dec.IsEncrypted || !dec.IsSigned {
+			log.Printf("ERROR: Encrypted Packet was not signed, or not encrypted!")
+			return
+		}
+
+		log.Printf("Signed By: %v", dec.SignedBy.PublicKey.Fingerprint)
+		sfp := dec.SignedBy.PublicKey.Fingerprint
+		if nn.ID != [20]byte{} && sfp != nn.ID {
+			log.Printf("ERROR: Encrypted Packet was signed by a different key then the nodes ID! (%v != %v)",
+				dec.SignedBy.PublicKey.Fingerprint, nn.ID)
+			return
+		}
+
+		data, _ = ioutil.ReadAll(dec.LiteralData.Body)
+		if len(data) <= 0 {
+			log.Printf("ERROR: No data decoded from encrypted packet!")
+			return
+		}
+	}
+
+	// Unmarshal the data into a blank packet to get the type out
+	json.Unmarshal(data, &id_pk)
+
+	// Check if the timestamp has expired (this will be encrypted, and thus prevents replay attacks)
+	if time.Now().Sub(id_pk.Time) > (time.Second * 30) {
+		log.Printf("Packet is expired: %v (%v)", id_pk.Time, data)
+		return
+	}
+
+	log.Printf("Got packet w/ id `%v`", id_pk.ID)
+
+	if nc.InHistory(id_pk.UID) {
+		log.Printf("Already parsed packet w/ ID %v")
+		return
+	}
+
+	switch id_pk.ID {
+	case 1:
+		var obj PacketHello
+		json.Unmarshal(data, &obj)
+		nn.handleWelcomePacket(nc, obj)
+		parsed = &obj
+	case 2:
+		var obj PacketAuth
+		json.Unmarshal(data, &obj)
+		nn.handleAuthPacket(nc, obj)
+		parsed = &obj
+	case 3:
+		var obj PacketPing
+		json.Unmarshal(data, &obj)
+		nn.handlePingPacket(nc, obj)
+		parsed = &obj
+	case 20:
+		var obj PacketPeerListRequest
+		json.Unmarshal(data, &obj)
+		nn.handlePeerListRequestPacket(nc, obj)
+		parsed = &obj
+	case 21:
+		var obj PacketPeerListSync
+		json.Unmarshal(data, &obj)
+		nn.handlePeerListSyncPacket(nc, obj)
+		parsed = &obj
+	}
+
+	// Add packet too history, and slice end of history off if required
+	nc.history = append(nc.history, id_pk.UID)
+	if len(nc.history) > MAX_HISTORY {
+		nc.history = nc.history[1:]
+	}
+
+	if id_pk.Prop {
+		if time.Now().Sub(nn.LastProp) <= time.Minute {
+			log.Printf("Cannot propagate packet w/ id %v from %v; too soon sense last propagate!", id_pk.ID, nn.ID)
+			return
+		}
+		nn.LastProp = time.Now()
+
+		for _, node := range nc.Peers {
+			if node == nn {
+				continue
+			}
+
+			node.Send(parsed, true)
+		}
+	}
+}
+
+func (nn *NetNode) handleProxyPacket(nc *NetClient, p PacketProxyPacket) {
+	// Check if the packet is intended for us
+	if p.Dest == nc.Ident.PrimaryKey.Fingerprint {
+		nn.HandlePacket(nc, p.Payload)
+		return
+	}
+
+	// Check if we have the destination node as a peer
+	if _, exists := nc.Peers[p.Dest]; exists {
+		nc.Peers[p.Dest].Send(&p, false)
+		return
+	}
+
+	// TODO: handle queue
+	// TODO: handle importance
+}
+
+func (nn *NetNode) handlePingPacket(nc *NetClient, p PacketPing) {
+	log.Printf("I'VE BEEN PINGED MATEY!")
 }
 
 func (nn *NetNode) handlePeerListRequestPacket(nc *NetClient, p PacketPeerListRequest) {
@@ -182,6 +250,11 @@ func (nn *NetNode) handlePeerListRequestPacket(nc *NetClient, p PacketPeerListRe
 			break
 		}
 
+		// Don't send clients themselves
+		if peer == nn {
+			continue
+		}
+
 		pr := PacketPeer{peer.ID, peer.Conn.RemoteAddr().String()}
 
 		peerli = append(peerli, pr)
@@ -189,7 +262,7 @@ func (nn *NetNode) handlePeerListRequestPacket(nc *NetClient, p PacketPeerListRe
 
 	nn.Send(&PacketPeerListSync{
 		Peers: peerli,
-	})
+	}, false)
 }
 
 func (nn *NetNode) handlePeerListSyncPacket(nc *NetClient, p PacketPeerListSync) {
@@ -217,11 +290,12 @@ func (nn *NetNode) handleAuthPacket(nc *NetClient, p PacketAuth) {
 	// ehhhhhh
 	nn.ID = nn.Key[0].PrimaryKey.Fingerprint
 	nc.Peers[nn.ID] = nn
+	nn.PeerCount = p.PeerCount
 
 	log.Printf("Successfully authenticated!")
 	nn.Send(&PacketPeerListRequest{
 		MaxPeers: 50,
-	})
+	}, false)
 
 }
 
@@ -243,6 +317,7 @@ func (nn *NetNode) handleWelcomePacket(nc *NetClient, p PacketHello) {
 
 	nn.Key = pub_ring
 	nn.ID = nn.Key[0].PrimaryKey.Fingerprint
+	nn.PeerCount = p.PeerCount
 
 	// This doesn't quiet seem right
 	nc.Peers[nn.ID] = nn
@@ -253,20 +328,34 @@ func (nn *NetNode) handleWelcomePacket(nc *NetClient, p PacketHello) {
 	packet := PacketAuth{
 		PublicKey: pub_w.Bytes(),
 		T1:        p.Token,
+		PeerCount: len(nc.Peers),
 	}
 
-	nn.Send(&packet)
+	nn.Send(&packet, false)
 }
 
-// Send a packet to the node
-func (nn *NetNode) Send(packet Packet) {
+func (nn *NetNode) handleNewCrate(nc *NetClient, p PacketNewCrate) {
+	if nc.Store.HasCrate(p.Crate.ID) {
+		log.Printf("Not adding crate %v, already have it!", p.Crate.ID)
+		return
+	}
+
+	log.Printf("Adding crate %v", p.Crate.ID)
+	nc.Store.PutCrate(p.Crate)
+}
+
+// Build a packet data
+func (nn *NetNode) BuildPacket(packet Packet, writeid bool) []byte {
 	var network []byte
 
-	packet.SetID()
+	if writeid {
+		packet.SetID()
+	}
+
 	data, err := json.Marshal(packet)
 	if err != nil {
-		log.Printf("ERROR SENDING: %v", err)
-		return
+		log.Printf("ERROR BUILDING: %v", err)
+		return network
 	}
 
 	if nn.Key != nil {
@@ -285,9 +374,12 @@ func (nn *NetNode) Send(packet Packet) {
 		network = data
 	}
 
-	network = append(network, '\n')
+	return append(network, '\n')
+}
 
-	nn.Conn.Write(network)
+// Send a packet to the node
+func (nn *NetNode) Send(packet Packet, pass bool) {
+	nn.Conn.Write(nn.BuildPacket(packet, !pass))
 }
 
 func (nn *NetNode) Handshake(nc *NetClient) bool {
@@ -300,7 +392,8 @@ func (nn *NetNode) Handshake(nc *NetClient) bool {
 		PublicKey:   pkbuff.Bytes(),
 		NetworkHash: nc.NetworkID,
 		Token:       nn.token,
-	})
+		PeerCount:   len(nc.Peers),
+	}, false)
 	return true
 }
 
@@ -347,4 +440,48 @@ func (nc *NetClient) AttemptConnection(ip string) *NetNode {
 	node.Handshake(nc)
 
 	return &node
+}
+
+func (nc *NetClient) SendToClient(id [20]byte, p Packet, queued bool, important bool) bool {
+	if _, exists := nc.Peers[id]; exists {
+		nc.Peers[id].Send(p, true)
+		return false
+	}
+
+	var sendli []*NetNode
+	if important {
+		for _, node := range nc.Peers {
+			sendli = append(sendli, node)
+		}
+	} else {
+		var best *NetNode
+		for _, node := range nc.Peers {
+			if best == nil || node.PeerCount > best.PeerCount {
+				best = node
+			}
+		}
+		sendli = []*NetNode{best}
+	}
+
+	packet_data, _ := json.Marshal(p)
+	packet := PacketProxyPacket{
+		Dest:      id,
+		Payload:   packet_data,
+		Queue:     queued,
+		Important: important,
+	}
+
+	for _, node := range sendli {
+		node.Send(&packet, true)
+	}
+	return true
+}
+
+func (nc *NetClient) InHistory(id int32) bool {
+	for _, val := range nc.history {
+		if val == id {
+			return true
+		}
+	}
+	return false
 }
