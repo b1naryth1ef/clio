@@ -1,10 +1,15 @@
 # Clio
 
+Clio is an advanced P2P network which represents a completely distributed and decentralized nature. It uses peer seeding, message passing, and advanced routing to keep a structurally simple and yet robust P2P network. It was written in Go, using OpenGPG as the encryption and identification layer. The intention for building it was to create a dynamic sharing network similar to current social networks, but completely distributed, encrypted, and simple.
+
+### Structure
+Each node in a Clio network represents an OpenGPG public key fingerprint, allowing messages to be dynamically encrypted and routed too any node on the network regardless of active connections. Clio also implements a caching and archiving system much like a distributed database to allow for (somewhat) delayed message and data retreival. This allows a workflow similar to a website or email.
+
 ## cliod
-The clio library, represents a backend REST server and the networking components
+Cliod is the systems code for the network, including backend API's for joining and working with the network.
 
 ## clicli
-The frontend interactions code
+The frontend interactions code (???)
 
 ## TODO List
 
