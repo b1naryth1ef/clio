@@ -17,11 +17,19 @@ var MAX_HISTORY int = 50
 
 // A NetNode represents an external network node
 type NetNode struct {
-	ID        [20]byte
-	Trust     int
-	Conn      net.Conn
-	Valid     bool
-	Authed    bool
+	// ID represents the 20 byte public key fingerprint
+	ID [20]byte
+
+	// The level of trust we have assigned this node (unused currently)
+	Trust int
+
+	// The actual socket too this client
+	Conn net.Conn
+
+	// Whether the client is authenticated yet
+	Authed bool
+
+	// The amount of peers this client has
 	PeerCount int
 
 	// Represents the last time this node asked us to propagate something for limiting
@@ -36,14 +44,25 @@ type NetNode struct {
 
 // A NetClient represents a local client
 type NetClient struct {
-	Ident     *openpgp.Entity
-	Ring      *Ring
-	NetworkID string
-	Peers     map[[20]byte]*NetNode
-	Q         []*NetNode
-	Server    net.Listener
-	Store     *Store
+	// Our local public/private key pair
+	Ident *openpgp.Entity
 
+	// The ring for decrypting messages (TODO: try creating a new ring w/ ident)
+	Ring *Ring
+
+	// The network ID
+	NetworkID string
+
+	// A mapping of peer fingerprint/ids too the actual nodes
+	Peers map[[20]byte]*NetNode
+
+	// A socket server
+	Server net.Listener
+
+	// The backend crate-store
+	Store *Store
+
+	// List of historical packets we've parsed
 	history []int32
 }
 
@@ -58,7 +77,6 @@ func NewNetClient(listen_port int, id *openpgp.Entity, r *Ring, s *Store) NetCli
 		Ident:  id,
 		Ring:   r,
 		Peers:  make(map[[20]byte]*NetNode),
-		Q:      make([]*NetNode, 0),
 		Server: server,
 		Store:  s,
 	}
@@ -106,6 +124,7 @@ func (nn *NetNode) ListenLoop(nc *NetClient) {
 
 		if err != nil {
 			log.Printf("Error: %v", err)
+			delete(nc.Peers, nn.ID)
 			break
 		}
 		data[len(data)-1] = ' '
@@ -123,20 +142,25 @@ func (nn *NetNode) HandlePacket(nc *NetClient, data []byte) {
 	if data[0] == '\x00' {
 		var obj EncryptedPacket
 
+		// Unmarshal the data into the EncryptedPacket struct, ignoring the null byte
 		json.Unmarshal(data[1:], &obj)
 
+		// Decrypt the payload (this may fail if it's not encrypted for us)
 		dec := nc.Decrypt(obj.Payload)
 		if dec == nil {
 			log.Printf("ERROR: Failed to decrypt packet!")
 			return
 		}
 
+		// Make sure the payload was actually encrypted and signed by someone, this prevents people
+		//  from just sending random shit in the payload
 		if !dec.IsEncrypted || !dec.IsSigned {
 			log.Printf("ERROR: Encrypted Packet was not signed, or not encrypted!")
 			return
 		}
 
-		log.Printf("Signed By: %v", dec.SignedBy.PublicKey.Fingerprint)
+		// Make sure that this packet was encrypted from the node that it was sent from
+		// TOOD: in the future we may want to allow proxying encrypted messages
 		sfp := dec.SignedBy.PublicKey.Fingerprint
 		if nn.ID != [20]byte{} && sfp != nn.ID {
 			log.Printf("ERROR: Encrypted Packet was signed by a different key then the nodes ID! (%v != %v)",
@@ -144,6 +168,7 @@ func (nn *NetNode) HandlePacket(nc *NetClient, data []byte) {
 			return
 		}
 
+		// Make sure we have data, and replace the data buffer with the decrypted data
 		data, _ = ioutil.ReadAll(dec.LiteralData.Body)
 		if len(data) <= 0 {
 			log.Printf("ERROR: No data decoded from encrypted packet!")
@@ -151,7 +176,7 @@ func (nn *NetNode) HandlePacket(nc *NetClient, data []byte) {
 		}
 	}
 
-	// Unmarshal the data into a blank packet to get the type out
+	// Unmarshal the data into a blank packet struct to get the type out
 	json.Unmarshal(data, &id_pk)
 
 	// Check if the timestamp has expired (this will be encrypted, and thus prevents replay attacks)
@@ -162,11 +187,13 @@ func (nn *NetNode) HandlePacket(nc *NetClient, data []byte) {
 
 	log.Printf("Got packet w/ id `%v`", id_pk.ID)
 
+	// Make sure we haven't seen this /exact/ packet before
 	if nc.InHistory(id_pk.UID) {
 		log.Printf("Already parsed packet w/ ID %v")
 		return
 	}
 
+	// Parse the packet into a struct and pass it too a handler function
 	switch id_pk.ID {
 	case 1:
 		var obj PacketHello
@@ -201,13 +228,16 @@ func (nn *NetNode) HandlePacket(nc *NetClient, data []byte) {
 		nc.history = nc.history[1:]
 	}
 
+	// If this packet is asking too be propegated, try doing so
 	if id_pk.Prop {
+		// Rate limiting for propagation
 		if time.Now().Sub(nn.LastProp) <= time.Minute {
 			log.Printf("Cannot propagate packet w/ id %v from %v; too soon sense last propagate!", id_pk.ID, nn.ID)
 			return
 		}
 		nn.LastProp = time.Now()
 
+		// Send to all the peers we have
 		for _, node := range nc.Peers {
 			if node == nn {
 				continue
