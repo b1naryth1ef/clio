@@ -62,6 +62,9 @@ type NetClient struct {
 	// The backend crate-store
 	Store *Store
 
+	// A queue of peers we've requested connections too
+	PeerRequestQueue map[[20]byte]bool
+
 	// List of historical packets we've parsed
 	history []int32
 }
@@ -210,6 +213,20 @@ func (nn *NetNode) HandlePacket(nc *NetClient, data []byte) {
 		json.Unmarshal(data, &obj)
 		nn.handlePingPacket(nc, obj)
 		parsed = &obj
+	case 4:
+		var obj PacketProxyPacket
+		json.Unmarshal(data, &obj)
+		nn.handleProxyPacket(nc, obj)
+		parsed = &obj
+	case 10:
+		var obj PacketFindPeer
+		json.Unmarshal(data, &obj)
+		//nn.handleProxyPacket(nc, obj)
+		parsed = &obj
+	case 11:
+		var obj PacketFoundPeer
+		json.Unmarshal(data, &obj)
+		parsed = &obj
 	case 20:
 		var obj PacketPeerListRequest
 		json.Unmarshal(data, &obj)
@@ -244,6 +261,26 @@ func (nn *NetNode) HandlePacket(nc *NetClient, data []byte) {
 			}
 
 			node.Send(parsed, true)
+		}
+	}
+}
+
+func (nn *NetNode) handleFindPeerPacket(nc *NetClient, p PacketFindPeer) {
+	if _, exists := nc.Peers[p.Peer]; exists {
+		log.Printf("We have a peer someone has requested, sending...")
+		nn.Send(&PacketFoundPeer{
+			Peer: p.Peer,
+			IP:   nn.Conn.RemoteAddr().String(),
+		}, false)
+	}
+}
+
+func (nn *NetNode) handleFoundPeerPacket(nc *NetClient, p PacketFoundPeer) {
+	if _, exists := nc.PeerRequestQueue[p.Peer]; exists {
+		if _, exists2 := nc.Peers[p.Peer]; !exists2 {
+			log.Printf("We've found a peer we requested! Attempting connection...")
+			nc.AttemptConnection(p.IP)
+			delete(nc.PeerRequestQueue, p.Peer)
 		}
 	}
 }

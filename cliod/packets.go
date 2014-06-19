@@ -58,6 +58,17 @@ type PacketProxyPacket struct {
 	Important bool
 }
 
+type PacketFindPeer struct {
+	BasePacket
+	Peer [20]byte
+}
+
+type PacketFoundPeer struct {
+	BasePacket
+	Peer [20]byte
+	IP   string
+}
+
 type PacketPeerListRequest struct {
 	BasePacket
 	MaxPeers int32
@@ -101,6 +112,14 @@ func (p *PacketPing) SetID() {
 
 func (p *PacketProxyPacket) SetID() {
 	p.BasePacket = NewBasePacket(4)
+}
+
+func (p *PacketFindPeer) SetID() {
+	p.BasePacket = NewBasePacket(10)
+}
+
+func (p *PacketFoundPeer) SetID() {
+	p.BasePacket = NewBasePacket(11)
 }
 
 func (p *PacketPeerListRequest) SetID() {

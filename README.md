@@ -16,7 +16,13 @@ The frontend interactions code (???)
 - Start testing the actual network, this means we need to either generate a bunch of pgp keys or fake them
 - Fully implement crates and syncing, write some good logic for this
 - Wrap stuff cleanly in a API and build out a frontend for sheeet
+- Implement proper routing tables
 - Test propagation time on a large network, etc
 - Robustness testing, reliability testing
 - Figure out the limits of the networking layer
 - Refactor/cleanup?
+
+## ETC
+
+- TCP vs UDP? Read up on hole punching/etc
+- Proper routing table algorithims
