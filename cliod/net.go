@@ -439,7 +439,8 @@ func (nn *NetNode) BuildPacket(packet Packet, writeid bool) []byte {
 		log.Printf("ERROR BUILDING: %v", err)
 		return network
 	}
-	log.Printf("DATA: %s", data)
+
+	before_enc := len(data)
 
 	if nn.Key != nil {
 		network = append(network, '\x00')
@@ -455,6 +456,12 @@ func (nn *NetNode) BuildPacket(packet Packet, writeid bool) []byte {
 		}
 	} else {
 		network = data
+	}
+
+	after_enc := len(network)
+
+	if before_enc != after_enc {
+		log.Printf("Packet Size:\n \tBefore: %v \n\tAfter: %v", before_enc, after_enc)
 	}
 
 	return append(network, '\n')
