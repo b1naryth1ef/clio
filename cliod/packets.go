@@ -1,6 +1,10 @@
 package cliod
 
-import "time"
+import (
+	"code.google.com/p/go-uuid/uuid"
+	"strings"
+	"time"
+)
 
 type Packet interface {
 	SetID()
@@ -8,7 +12,7 @@ type Packet interface {
 
 type BasePacket struct {
 	ID   uint16
-	UID  int32
+	UID  string
 	Time time.Time
 	Prop bool
 }
@@ -22,7 +26,7 @@ func NewBasePacket(ID uint16) BasePacket {
 	return BasePacket{
 		ID:   ID,
 		Time: time.Now(),
-		UID:  GetRandomToken(),
+		UID:  strings.Replace(uuid.New(), "-", "", -1),
 	}
 }
 
@@ -42,7 +46,7 @@ type PacketHello struct {
 type PacketAuth struct {
 	BasePacket
 	PublicKey []byte
-	T1        int32
+	Token     int32
 	PeerCount int
 }
 

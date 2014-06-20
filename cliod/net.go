@@ -71,7 +71,7 @@ type NetClient struct {
 	PeerRequestQueue map[[20]byte]bool
 
 	// List of historical packets we've parsed
-	history []int32
+	history []string
 }
 
 // Create a new NetClient
@@ -196,6 +196,12 @@ func (nn *NetNode) HandlePacket(nc *NetClient, data []byte) {
 
 	log.Printf("Got packet w/ id `%v`", id_pk.ID)
 
+	// Make sure the length makes sense
+	if len(id_pk.UID) > 32 {
+		log.Printf("Packet has invalid UID length!")
+		return
+	}
+
 	// Make sure we haven't seen this /exact/ packet before
 	if nc.InHistory(id_pk.UID) {
 		log.Printf("Already parsed packet w/ ID %v")
@@ -227,11 +233,12 @@ func (nn *NetNode) HandlePacket(nc *NetClient, data []byte) {
 	case 10:
 		var obj PacketFindPeer
 		json.Unmarshal(data, &obj)
-		//nn.handleProxyPacket(nc, obj)
+		nn.handleFindPeerPacket(nc, obj)
 		parsed = &obj
 	case 11:
 		var obj PacketFoundPeer
 		json.Unmarshal(data, &obj)
+		nn.handleFoundPeerPacket(nc, obj)
 		parsed = &obj
 	case 20:
 		var obj PacketPeerListRequest
@@ -350,7 +357,7 @@ func (nn *NetNode) handlePeerListSyncPacket(nc *NetClient, p PacketPeerListSync)
 }
 
 func (nn *NetNode) handleAuthPacket(nc *NetClient, p PacketAuth) {
-	if p.T1 != nn.token {
+	if p.Token != nn.token {
 		log.Printf("ERROR: Auth Packet token did not match!")
 		return
 	}
@@ -402,7 +409,7 @@ func (nn *NetNode) handleWelcomePacket(nc *NetClient, p PacketHello) {
 
 	packet := PacketAuth{
 		PublicKey: pub_w.Bytes(),
-		T1:        p.Token,
+		Token:     p.Token,
 		PeerCount: len(nc.Peers),
 	}
 
@@ -432,6 +439,7 @@ func (nn *NetNode) BuildPacket(packet Packet, writeid bool) []byte {
 		log.Printf("ERROR BUILDING: %v", err)
 		return network
 	}
+	log.Printf("DATA: %s", data)
 
 	if nn.Key != nil {
 		network = append(network, '\x00')
@@ -554,7 +562,7 @@ func (nc *NetClient) SendToClient(id [20]byte, p Packet, queued bool, important 
 	return true
 }
 
-func (nc *NetClient) InHistory(id int32) bool {
+func (nc *NetClient) InHistory(id string) bool {
 	for _, val := range nc.history {
 		if val == id {
 			return true
