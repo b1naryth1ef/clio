@@ -1,7 +1,6 @@
 package cliod
 
 import (
-	"code.google.com/p/go-uuid/uuid"
 	"strings"
 	"time"
 )
@@ -26,7 +25,7 @@ func NewBasePacket(ID uint16) BasePacket {
 	return BasePacket{
 		ID:   ID,
 		Time: time.Now(),
-		UID:  strings.Replace(uuid.New(), "-", "", -1),
+		UID:  strings.Replace(NewRandomID(), "-", "", -1),
 	}
 }
 
@@ -52,7 +51,6 @@ type PacketAuth struct {
 
 type PacketPing struct {
 	BasePacket
-	Token int
 }
 
 type PacketProxyPacket struct {

@@ -12,7 +12,6 @@ type Server struct {
 }
 
 func NewServer(addr string) Server {
-	// router := mux.NewRouter()
 	router := http.NewServeMux()
 
 	return Server{
@@ -27,8 +26,10 @@ func NewServer(addr string) Server {
 func (s *Server) BindAll() {
 	r := mux.NewRouter()
 
-	// API Methods
-	r.HandleFunc("/api/init", s.HandleAPIInit)
+	api_r := r.PathPrefix("/api").Subrouter()
+	api_r.HandleFunc("/init", s.HandleAPIInit)
+
+	// Bind our router to the HTTP router
 	s.Router.Handle("/", r)
 }
 

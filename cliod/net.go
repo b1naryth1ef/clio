@@ -37,6 +37,7 @@ type NetNode struct {
 
 	// Represents the last time this node asked us to propagate something for limiting
 	LastProp time.Time
+	LastPing time.Time
 
 	// The public key of thise node
 	Key openpgp.EntityList
@@ -69,6 +70,8 @@ type NetClient struct {
 
 	// A queue of peers we've requested connections too
 	PeerRequestQueue map[[20]byte]bool
+
+	Running bool
 
 	// List of historical packets we've parsed
 	history []string
@@ -316,7 +319,7 @@ func (nn *NetNode) handleProxyPacket(nc *NetClient, p PacketProxyPacket) {
 }
 
 func (nn *NetNode) handlePingPacket(nc *NetClient, p PacketPing) {
-	log.Printf("I'VE BEEN PINGED MATEY!")
+	nn.LastPing = p.Time
 }
 
 func (nn *NetNode) handlePeerListRequestPacket(nc *NetClient, p PacketPeerListRequest) {
@@ -576,4 +579,25 @@ func (nc *NetClient) InHistory(id string) bool {
 		}
 	}
 	return false
+}
+
+func (nc *NetClient) Run() {
+	go nc.ServerListenerLoop()
+	go nc.PingLoop()
+}
+
+func (nc *NetClient) PingLoop() {
+	for nc.Running {
+		time.Sleep(time.Minute)
+
+		for _, nn := range nc.Peers {
+			if time.Now().Sub(nn.LastPing) >= time.Second*150 {
+				log.Printf("Node %v has timed out!", nn.ID)
+				// TODO: disconnect
+				continue
+			}
+
+			nn.Send(&PacketPing{}, false)
+		}
+	}
 }

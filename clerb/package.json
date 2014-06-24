@@ -1,6 +1,6 @@
 {
     "name": "clerb",
-    "main": "html/index.html",
+    "main": "static/index.html",
     "window": {
         "show": true,
         "toolbar": false,

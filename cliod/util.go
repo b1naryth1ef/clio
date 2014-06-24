@@ -2,6 +2,8 @@ package cliod
 
 import (
 	"bytes"
+	"code.google.com/p/go-uuid/uuid"
+	"crypto/md5"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -36,4 +38,10 @@ func PathExists(path string) bool {
 		return false
 	}
 	return false
+}
+
+// We use an MD5 sum of a random UUID to avoid leaking UUID data through
+func NewRandomID() string {
+	sum := md5.Sum([]byte(uuid.New()))
+	return string(sum[:])
 }

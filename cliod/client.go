@@ -4,10 +4,26 @@ import (
 	"code.google.com/p/go.crypto/openpgp"
 )
 
+type ClientConfig struct {
+	KeyPath string
+}
+
 type Client struct {
-	Ident *openpgp.Entity
-	NC    *NetClient
-	CI    *ClientInterface
+	Ident  *openpgp.Entity
+	NC     *NetClient
+	CI     ClientInterface
+	PP     *PasswordPolicy
+	Config *ClientConfig
+}
+
+// TODO
+func NewClient(keypath string) Client {
+	return Client{}
+}
+
+// TODO
+func NewClientFromConfig(config string) Client {
+	return Client{}
 }
 
 type ClientInterface interface {
