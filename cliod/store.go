@@ -5,6 +5,7 @@ package cliod
 
 import (
 	"code.google.com/p/go-uuid/uuid"
+	"crypto/md5"
 	"encoding/json"
 	"io/ioutil"
 	"os"
@@ -21,6 +22,12 @@ var (
 	// Used when we are related to the crate and want to hold on too it
 	STORE_TYPE_ARCHIVE = "ARCHIVE"
 )
+
+// We use an MD5 sum of a random UUID to avoid leaking UUID data through
+func NewCrateID() string {
+	sum := md5.Sum([]byte(uuid.New()))
+	return string(sum[:])
+}
 
 type Store struct {
 	StorePath string
@@ -94,7 +101,7 @@ type Crate struct {
 
 func NewCrate(data []byte, tags []string) Crate {
 	return Crate{
-		ID:   uuid.New(),
+		ID:   NewCrateID(),
 		Time: time.Now(),
 		Tags: tags,
 		Raw:  data,
