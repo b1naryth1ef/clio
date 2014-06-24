@@ -502,8 +502,9 @@ func (nc *NetClient) ServerListenerLoop() {
 
 		log.Printf("Got connection: %v", conn.RemoteAddr())
 		node := NetNode{
-			nc:   nc,
-			Conn: conn,
+			nc:       nc,
+			Conn:     conn,
+			LastPing: time.Now(),
 		}
 
 		go node.ListenLoop(nc)
@@ -582,6 +583,7 @@ func (nc *NetClient) InHistory(id string) bool {
 }
 
 func (nc *NetClient) Run() {
+	nc.Running = true
 	go nc.ServerListenerLoop()
 	go nc.PingLoop()
 }

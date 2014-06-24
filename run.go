@@ -12,8 +12,8 @@ import (
 var network_id = string("")
 
 func main() {
-	cliod.Test()
-	return
+	// cliod.Test()
+	// return
 	if len(os.Args) < 3 {
 		fmt.Printf("Usage: ./run <email> <port> [seed_addr]\n")
 		return
@@ -37,7 +37,7 @@ func main() {
 	store.Init()
 
 	client := cliod.NewNetClient(port, key, &ring, &store)
-	go client.ServerListenerLoop()
+	client.Run()
 
 	if seed != "" {
 		client.Seed(network_id, []string{seed})

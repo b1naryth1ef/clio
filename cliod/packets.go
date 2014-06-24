@@ -1,7 +1,6 @@
 package cliod
 
 import (
-	"strings"
 	"time"
 )
 
@@ -25,7 +24,7 @@ func NewBasePacket(ID uint16) BasePacket {
 	return BasePacket{
 		ID:   ID,
 		Time: time.Now(),
-		UID:  strings.Replace(NewRandomID(), "-", "", -1),
+		UID:  NewRandomID(),
 	}
 }
 
